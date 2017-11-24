@@ -6,6 +6,9 @@ module Productivity.TimeTracking.KTT (
   WorkFlow(..),
   WorkFlowEntry(..),
   parseWorkFlowEntry,
+  parseProjectNameAndTags,
+  parseProjectName,
+  parseTags,
   loadWorkFlowFromFile,
   combineFrames,
   renderWorkFlowEntry,
@@ -49,10 +52,17 @@ renderWorkFlowEntry :: WorkFlowEntry -> T.Text
 renderWorkFlowEntry entry = TL.toStrict . TLB.toLazyText . mconcat $ case entry of
   FrameStart project tags timestamp ->
     [ TLB.fromText . T.pack $ timePrint timeFormat timestamp,
+      TLB.singleton ' ',
+      TLB.fromText "START",
+      TLB.singleton ' ',
       TLB.fromText project,
+      TLB.singleton ' ',
       TLB.fromText . T.unwords . fmap (T.cons '+') $ tags ]
   FrameStop project timestamp ->
     [ TLB.fromText . T.pack $ timePrint timeFormat timestamp,
+      TLB.singleton ' ',
+      TLB.fromText "STOP",
+      TLB.singleton ' ',
       TLB.fromText project ]
   where
     timeFormat :: String
@@ -65,9 +75,12 @@ appendWorkFlowEntry :: FilePath -> WorkFlowEntry -> IO ()
 appendWorkFlowEntry filename entry =
   withFile filename ReadWriteMode (\h -> do
     hSeek h SeekFromEnd 1
-    lastChar <- hGetChar h
+    isEnd <- hIsEOF h
+    when (not isEnd) $ do
+      lastChar <- hGetChar h
+      hSeek h SeekFromEnd 0
+      when (lastChar /= '\n') $ hPutStrLn h ""
     hSeek h SeekFromEnd 0
-    when (lastChar /= '\n') $ hPutStrLn h ""
     TIO.hPutStrLn h $ renderWorkFlowEntry entry)
 
 combineFrames :: WorkFlow -> ([Frame], [T.Text])
@@ -99,7 +112,7 @@ loadWorkFlowFromFile filename = do
     parserConduit = do
       c <- await
       case c of
-        Just input -> 
+        Just input -> do
           case parseWorkFlowEntry input of
             Left _ -> parserConduit
             Right entry -> do
@@ -145,31 +158,33 @@ workFlowEntryParser = do
         "STOP" -> return Stop
         _ -> unexpected (Tokens $ fromList s)
 
-    parseProjectNameAndTags = do
-      pn <- parseProjectName
-      tags <- parseTags
-      return (pn, tags)
+parseProjectNameAndTags :: Parsec () T.Text (T.Text, [T.Text])
+parseProjectNameAndTags = do
+  pn <- parseProjectName
+  tags <- parseTags
+  return (pn, tags)
 
-    parseProjectName = do
-      projectWords <- some projectWord
-      return $ T.unwords projectWords
-
+parseProjectName :: Parsec () T.Text T.Text
+parseProjectName = do
+  projectWords <- some projectWord
+  return $ T.unwords projectWords
+  where
     projectWord = do
       first <- satisfy (\x -> (not . isSpace) x && x /= '+')
       rest <- many (alphaNumChar <|> symbolChar)
       skipMany separatorChar
       return $ T.pack (first : rest)
 
-    parseTags = do
-      tags <- many parseTag
-      return tags
-
+parseTags :: Parsec () T.Text [T.Text]
+parseTags = do
+  tags <- many parseTag
+  return tags
+  where
     parseTag = do
       void $ char '+'
       tag <- some (alphaNumChar <|> symbolChar)
       skipMany separatorChar
       return $ T.pack tag
-
         
 parseWorkFlowEntry :: T.Text -> Either T.Text WorkFlowEntry
 parseWorkFlowEntry input = case parse workFlowEntryParser "" input of
