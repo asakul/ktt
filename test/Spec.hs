@@ -19,6 +19,7 @@ testParsing = testGroup "Parsing" [ testFrameParsing ]
 
 testFrameParsing :: TestTree
 testFrameParsing = testGroup "Frame parsing" [ testWFEStartParsing,
+  testWFEStartParsingWithLineend,
   testWFEStartParsingTwoTags,
   testWFEStartParsingUnicode,
   testWFEStopParsing
@@ -44,3 +45,7 @@ testWFEStopParsing = testCase "WFEStop parsing" $ do
     Left err -> assertFailure $ "Parser returned failure: " ++ T.unpack err
     Right entry -> assertEqual "Invalid FrameStop entry" (FrameStop "Foobar" (DateTime (Date 2017 November 24) (TimeOfDay 10 27 0 0))) entry
 
+testWFEStartParsingWithLineend = testCase "WFEStart parsing with line end" $ do
+  case parseWorkFlowEntry "2017/11/24 10:27:00 START Foobar   \r" of
+    Left err -> assertFailure $ "Parser returned failure: " ++ T.unpack err
+    Right entry -> assertEqual "Invalid FrameStart entry" (FrameStart "Foobar" [] (DateTime (Date 2017 November 24) (TimeOfDay 10 27 0 0))) entry

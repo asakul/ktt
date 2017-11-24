@@ -25,6 +25,7 @@ library
                      , conduit-extra
                      , containers
                      , resourcet
+                     , mtl
 
   default-language:    Haskell2010
 

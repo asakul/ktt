@@ -11,10 +11,13 @@ module Productivity.TimeTracking.KTT (
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Trans.Resource
+import           Control.Monad.State
+import           Data.Char
 import           Data.Conduit
 import           Data.Conduit.Binary as CB
 import           Data.Conduit.List as CL
 import           Data.Conduit.Text as CT
+import qualified Data.Map as M
 import           Data.List.NonEmpty
 import qualified Data.Text as T
 import           Time.Types
@@ -37,16 +40,37 @@ data WorkFlowEntry = FrameStart T.Text [T.Text] DateTime | FrameStop T.Text Date
 data ActionToken = Start | Stop
   deriving (Show, Eq)
 
-loadWorkFlowFromFile :: FilePath -> IO [WorkFlowEntry]
+loadWorkFlowFromFile :: FilePath -> IO WorkFlow
 loadWorkFlowFromFile filename = do
-  runResourceT . runConduit $
+  f <- (flip evalStateT M.empty) . runResourceT . runConduit $
     CB.sourceFile filename =$=
     CT.decode CT.utf8 =$=
     CT.lines =$=
     parserConduit =$=
+    combineFrames =$=
     CL.consume
+  return $ WorkFlow f
   where
-    parserConduit :: Conduit T.Text (ResourceT IO) WorkFlowEntry
+    combineFrames :: Conduit WorkFlowEntry (ResourceT (StateT (M.Map T.Text Frame) IO)) Frame
+    combineFrames = do
+      mc <- await
+      case mc of
+        Just entry -> do
+          case entry of
+            FrameStart project tags timestamp -> modify' (\m -> M.insert project (Frame project tags (Just timestamp) Nothing) m)
+            FrameStop project timestamp -> do
+              m <- get
+              case M.lookup project m of
+                Just frame -> do 
+                  modify' (\s -> M.delete project s)
+                  yield $ frame { fEnd = Just timestamp }
+                Nothing -> return () -- TODO: wtf
+          combineFrames
+        _ -> do
+          m <- get
+          forM_ m yield
+
+    parserConduit :: Conduit T.Text (ResourceT (StateT (M.Map T.Text Frame) IO)) WorkFlowEntry
     parserConduit = do
       c <- await
       case c of
@@ -106,7 +130,7 @@ workFlowEntryParser = do
       return $ T.unwords projectWords
 
     projectWord = do
-      first <- noneOf ['+']
+      first <- satisfy (\x -> (not . isSpace) x && x /= '+')
       rest <- many (alphaNumChar <|> symbolChar)
       skipMany separatorChar
       return $ T.pack (first : rest)
