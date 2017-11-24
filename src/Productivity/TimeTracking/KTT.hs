@@ -1,28 +1,36 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Productivity.TimeTracking.KTT (
   Frame(..),
   WorkFlow(..),
   WorkFlowEntry(..),
   parseWorkFlowEntry,
-  loadWorkFlowFromFile
+  loadWorkFlowFromFile,
+  combineFrames,
+  renderWorkFlowEntry,
+  appendWorkFlowEntry
 ) where
 
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Trans.Resource
-import           Control.Monad.State
+import           Control.Monad.Writer
 import           Data.Char
 import           Data.Conduit
 import           Data.Conduit.Binary as CB
 import           Data.Conduit.List as CL
 import           Data.Conduit.Text as CT
+import           Data.Hourglass
 import qualified Data.Map as M
-import           Data.List.NonEmpty
+import           Data.List.NonEmpty hiding (reverse)
 import qualified Data.Text as T
-import           Time.Types
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Builder as TLB
+import qualified Data.Text.IO as TIO
 import           Text.Megaparsec
 import qualified Text.Megaparsec.Lexer as L
+import           System.IO
 
 data Frame = Frame {
   fProject :: T.Text,
@@ -31,46 +39,63 @@ data Frame = Frame {
   fEnd :: Maybe DateTime
 } deriving (Show, Eq)
 
-data WorkFlow = WorkFlow [Frame]
+data WorkFlow = WorkFlow [WorkFlowEntry]
   deriving (Show, Eq)
 
 data WorkFlowEntry = FrameStart T.Text [T.Text] DateTime | FrameStop T.Text DateTime
   deriving (Show, Eq)
 
+renderWorkFlowEntry :: WorkFlowEntry -> T.Text
+renderWorkFlowEntry entry = TL.toStrict . TLB.toLazyText . mconcat $ case entry of
+  FrameStart project tags timestamp ->
+    [ TLB.fromText . T.pack $ timePrint timeFormat timestamp,
+      TLB.fromText project,
+      TLB.fromText . T.unwords . fmap (T.cons '+') $ tags ]
+  FrameStop project timestamp ->
+    [ TLB.fromText . T.pack $ timePrint timeFormat timestamp,
+      TLB.fromText project ]
+  where
+    timeFormat :: String
+    timeFormat = "YYYY/MM/DD H:MI:S"
+
 data ActionToken = Start | Stop
   deriving (Show, Eq)
 
+appendWorkFlowEntry :: FilePath -> WorkFlowEntry -> IO ()
+appendWorkFlowEntry filename entry =
+  withFile filename ReadWriteMode (\h -> do
+    hSeek h SeekFromEnd 1
+    lastChar <- hGetChar h
+    hSeek h SeekFromEnd 0
+    when (lastChar /= '\n') $ hPutStrLn h ""
+    TIO.hPutStrLn h $ renderWorkFlowEntry entry)
+
+combineFrames :: WorkFlow -> ([Frame], [T.Text])
+combineFrames (WorkFlow entries) = runWriter $ combineFrames' entries M.empty []
+  where
+    combineFrames' (e:es) frames acc = case e of
+      FrameStart project tags timestamp -> do
+        when (M.member project frames) $ tell ["Project reopened: " `T.append` project]
+        combineFrames' es (M.insert project (Frame project tags (Just timestamp) Nothing) frames) acc
+      FrameStop project timestamp -> do
+        case M.lookup project frames of
+          Just frame -> combineFrames' es (M.delete project frames) (frame { fEnd = Just timestamp } : acc)
+          Nothing -> do
+            tell ["Unopened project is closed: " `T.append` project]
+            combineFrames' es frames acc
+    combineFrames' [] frames acc = return $ (fmap snd . M.toList) frames ++ acc
+
 loadWorkFlowFromFile :: FilePath -> IO WorkFlow
 loadWorkFlowFromFile filename = do
-  f <- (flip evalStateT M.empty) . runResourceT . runConduit $
+  f <- runResourceT . runConduit $
     CB.sourceFile filename =$=
     CT.decode CT.utf8 =$=
     CT.lines =$=
     parserConduit =$=
-    combineFrames =$=
     CL.consume
   return $ WorkFlow f
   where
-    combineFrames :: Conduit WorkFlowEntry (ResourceT (StateT (M.Map T.Text Frame) IO)) Frame
-    combineFrames = do
-      mc <- await
-      case mc of
-        Just entry -> do
-          case entry of
-            FrameStart project tags timestamp -> modify' (\m -> M.insert project (Frame project tags (Just timestamp) Nothing) m)
-            FrameStop project timestamp -> do
-              m <- get
-              case M.lookup project m of
-                Just frame -> do 
-                  modify' (\s -> M.delete project s)
-                  yield $ frame { fEnd = Just timestamp }
-                Nothing -> return () -- TODO: wtf
-          combineFrames
-        _ -> do
-          m <- get
-          forM_ m yield
-
-    parserConduit :: Conduit T.Text (ResourceT (StateT (M.Map T.Text Frame) IO)) WorkFlowEntry
+    parserConduit :: Conduit T.Text (ResourceT IO) WorkFlowEntry
     parserConduit = do
       c <- await
       case c of

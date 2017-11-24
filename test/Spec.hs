@@ -12,7 +12,7 @@ main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Unit tests" [ testParsing ]
+tests = testGroup "Unit tests" [ testParsing, testCombining ]
 
 testParsing :: TestTree
 testParsing = testGroup "Parsing" [ testFrameParsing ]
@@ -49,3 +49,14 @@ testWFEStartParsingWithLineend = testCase "WFEStart parsing with line end" $ do
   case parseWorkFlowEntry "2017/11/24 10:27:00 START Foobar   \r" of
     Left err -> assertFailure $ "Parser returned failure: " ++ T.unpack err
     Right entry -> assertEqual "Invalid FrameStart entry" (FrameStart "Foobar" [] (DateTime (Date 2017 November 24) (TimeOfDay 10 27 0 0))) entry
+
+testCombining :: TestTree
+testCombining = testGroup "Frame combining" [ testCombiningSimple ]
+
+testCombiningSimple = testCase "Combining: simple" $ do
+  let (frames, _) = combineFrames (WorkFlow [
+        (FrameStart "Foobar" ["foo", "bar"] (DateTime (Date 2017 November 24) (TimeOfDay 10 27 0 0))),
+        (FrameStop "Foobar" (DateTime (Date 2017 November 24) (TimeOfDay 11 27 0 0))) ])
+
+  length frames @?= 1
+  (Frame "Foobar" ["foo", "bar"] (Just (DateTime (Date 2017 November 24) (TimeOfDay 10 27 0 0))) (Just (DateTime (Date 2017 November 24) (TimeOfDay 11 27 0 0)))) @?= (head frames)
