@@ -40,8 +40,9 @@ executable tt
                      , megaparsec
                      , text
                      , safe
-                     , prettyprinter
                      , directory
+                     , containers
+                     , tabl
   default-language:    Haskell2010
 
 test-suite ktt-test

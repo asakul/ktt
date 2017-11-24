@@ -4,11 +4,13 @@ module Main where
 
 import Data.Monoid
 import Data.Maybe
+import qualified Data.Map as M
 import Data.Hourglass
-import Data.Text.Prettyprint.Doc (Doc, pretty, (<+>), vsep, hsep, brackets)
+import Text.Tabl
 import Console.Options
 import Text.Megaparsec
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import Time.System
 
 import System.Directory
@@ -43,7 +45,7 @@ main = do
         now <- dateCurrent
         (WorkFlow wfes) <- loadWorkFlowFromFile journalFile
         case headMay (reverse wfes) of
-          Just (FrameStart project _ _) -> 
+          Just (FrameStart project _ _) ->
             appendWorkFlowEntry journalFile (FrameStop project now)
           _ -> error "Last entry is not start")
     command "log" $ do
@@ -53,37 +55,53 @@ main = do
         if not (toParam combined)
           then mapM_ print wfes
           else do
-           print $ vsep . fmap ppFrame $ fst $ combineFrames wf)
+            let hdecor = DecorNone
+            let vdecor = DecorAll
+            let aligns = [AlignCentre, AlignCentre, AlignRight ]
+            let frames = fst $ combineFrames wf 
+            let cells = fmap createFrameRow frames
+            TIO.putStrLn $ tabl EnvAscii hdecor vdecor aligns cells)
+    command "report" $
+      action (\toParam -> do
+        frames <- fst . combineFrames <$> loadWorkFlowFromFile journalFile
+        let hdecor = DecorNone
+        let vdecor = DecorAll
+        let aligns = [AlignCentre]
+        let cells = fmap createReportRow $ M.toList $ foldl foldFrames M.empty frames
+        TIO.putStrLn $ tabl EnvAscii hdecor vdecor aligns cells)
+
+createFrameRow :: Frame -> [T.Text]
+createFrameRow frame = [ppTime (fStart frame), ppTime (fEnd frame), durationFrame, fProject frame, T.unwords (fTags frame)]
+  where
+    durationFrame = case (fStart frame, fEnd frame) of
+      (Just start, Just end) -> ppTimeDiff $ end `timeDiff` start
+      _ -> " *** "
+
+createReportRow :: (T.Text, Seconds) -> [T.Text]
+createReportRow (project, time) = [project, ppTimeDiff time]
+
+foldFrames :: M.Map T.Text Seconds -> Frame -> M.Map T.Text Seconds
+foldFrames m f = case (fStart f, fEnd f) of
+  (Just start, Just end) -> M.alter (\mx -> case mx of
+    Just x -> Just $ x + end `timeDiff` start
+    Nothing -> Just $ end `timeDiff` start) (fProject f) m
+  _ -> m
 
 ppTime :: Maybe DateTime -> T.Text
-ppTime mdt = case mdt of 
+ppTime mdt = case mdt of
   Just dt -> T.pack $ timePrint timeFormat dt
   Nothing -> missing
   where
     timeFormat :: String
     timeFormat = "YYYY/MM/DD H:MI:S"
-    missing = "-----------------"
+    missing = "-------------------"
 
-ppTimeDiff :: Seconds -> Doc ann
-ppTimeDiff totalSeconds = hsep $ fmap (pretty . T.pack) . catMaybes $ [ maybeZero h, maybeZero m, Just (show s) ]
+ppTimeDiff :: Seconds -> T.Text
+ppTimeDiff totalSeconds = T.unwords . fmap T.pack . catMaybes $ [ maybeZero h, maybeZero m, Just (show s) ]
   where
     d = fst $ fromSeconds totalSeconds
     h = durationHours d
     m = durationMinutes d
     s = durationSeconds d
     maybeZero z = if z > 0 then Just (show z) else Nothing
-
-ppFrame :: Frame -> Doc ann
-ppFrame f = case (fStart f, fEnd f) of
-  (Just start, Just end) -> "["
-    <+> pretty (ppTime (fStart f))
-    <+> "->"
-    <+> pretty (ppTime (fEnd f))
-    <+> "]"
-    <+> "("
-    <+> ppTimeDiff (end `timeDiff` start)
-    <+> ")"
-    <+> pretty (fProject f)
-    <+> (brackets $ hsep . fmap pretty $ (fTags f))
-  _ -> "[" <+> pretty (ppTime (fStart f)) <+> "->" <+> pretty (ppTime (fEnd f)) <+> "]" <+> pretty (fProject f)
 

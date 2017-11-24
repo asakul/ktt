@@ -171,7 +171,7 @@ parseProjectName = do
   where
     projectWord = do
       first <- satisfy (\x -> (not . isSpace) x && x /= '+')
-      rest <- many (alphaNumChar <|> symbolChar)
+      rest <- many (alphaNumChar <|> symbolChar <|> punctuationChar)
       skipMany separatorChar
       return $ T.pack (first : rest)
 
@@ -182,7 +182,7 @@ parseTags = do
   where
     parseTag = do
       void $ char '+'
-      tag <- some (alphaNumChar <|> symbolChar)
+      tag <- some (alphaNumChar <|> symbolChar <|> punctuationChar)
       skipMany separatorChar
       return $ T.pack tag
         
