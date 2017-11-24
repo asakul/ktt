@@ -2,28 +2,28 @@
 
 module Main where
 
-import Data.Monoid
-import Data.Maybe
-import qualified Data.Map as M
-import Data.Hourglass
-import Text.Tabl
-import Console.Options
-import Text.Megaparsec
-import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
-import Time.System
+import           Console.Options
+import           Data.Hourglass
+import qualified Data.Map                      as M
+import           Data.Maybe
+import           Data.Monoid
+import qualified Data.Text                     as T
+import qualified Data.Text.IO                  as TIO
+import           Text.Megaparsec
+import           Text.Tabl
+import           Time.System
 
-import System.Directory
-import System.Environment
-import Safe
+import           Safe
+import           System.Directory
+import           System.Environment
 
-import Productivity.TimeTracking.KTT
+import           Productivity.TimeTracking.KTT
 
 getJournalFilename = do
   e <- lookupEnv "KTT_JOURNAL_FILE"
   case e of
     Just fname -> return fname
-    _ -> getXdgDirectory XdgData "ktt.journal"
+    _          -> getXdgDirectory XdgData "ktt.journal"
 
 main :: IO ()
 main = do
@@ -58,7 +58,7 @@ main = do
             let hdecor = DecorNone
             let vdecor = DecorAll
             let aligns = [AlignCentre, AlignCentre, AlignRight ]
-            let frames = fst $ combineFrames wf 
+            let frames = fst $ combineFrames wf
             let cells = fmap createFrameRow frames
             TIO.putStrLn $ tabl EnvAscii hdecor vdecor aligns cells)
     command "report" $
@@ -75,7 +75,7 @@ createFrameRow frame = [ppTime (fStart frame), ppTime (fEnd frame), durationFram
   where
     durationFrame = case (fStart frame, fEnd frame) of
       (Just start, Just end) -> ppTimeDiff $ end `timeDiff` start
-      _ -> " *** "
+      _                      -> " *** "
 
 createReportRow :: (T.Text, Seconds) -> [T.Text]
 createReportRow (project, time) = [project, ppTimeDiff time]
@@ -83,7 +83,7 @@ createReportRow (project, time) = [project, ppTimeDiff time]
 foldFrames :: M.Map T.Text Seconds -> Frame -> M.Map T.Text Seconds
 foldFrames m f = case (fStart f, fEnd f) of
   (Just start, Just end) -> M.alter (\mx -> case mx of
-    Just x -> Just $ x + end `timeDiff` start
+    Just x  -> Just $ x + end `timeDiff` start
     Nothing -> Just $ end `timeDiff` start) (fProject f) m
   _ -> m
 

@@ -1,5 +1,5 @@
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 module Productivity.TimeTracking.KTT (
   Frame(..),
@@ -21,25 +21,25 @@ import           Control.Monad.Trans.Resource
 import           Control.Monad.Writer
 import           Data.Char
 import           Data.Conduit
-import           Data.Conduit.Binary as CB
-import           Data.Conduit.List as CL
-import           Data.Conduit.Text as CT
+import           Data.Conduit.Binary          as CB
+import           Data.Conduit.List            as CL
+import           Data.Conduit.Text            as CT
 import           Data.Hourglass
-import qualified Data.Map as M
-import           Data.List.NonEmpty hiding (reverse)
-import qualified Data.Text as T
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Builder as TLB
-import qualified Data.Text.IO as TIO
-import           Text.Megaparsec
-import qualified Text.Megaparsec.Lexer as L
+import           Data.List.NonEmpty           hiding (reverse)
+import qualified Data.Map                     as M
+import qualified Data.Text                    as T
+import qualified Data.Text.IO                 as TIO
+import qualified Data.Text.Lazy               as TL
+import qualified Data.Text.Lazy.Builder       as TLB
 import           System.IO
+import           Text.Megaparsec
+import qualified Text.Megaparsec.Lexer        as L
 
 data Frame = Frame {
   fProject :: T.Text,
-  fTags :: [T.Text],
-  fStart :: Maybe DateTime,
-  fEnd :: Maybe DateTime
+  fTags    :: [T.Text],
+  fStart   :: Maybe DateTime,
+  fEnd     :: Maybe DateTime
 } deriving (Show, Eq)
 
 data WorkFlow = WorkFlow [WorkFlowEntry]
@@ -149,14 +149,14 @@ workFlowEntryParser = do
       second <- fromInteger <$> L.decimal
       skipSome spaceChar
       return $ DateTime (Date year (toEnum (month - 1)) day) (TimeOfDay hour minute second 0)
-     
+
     parseStartOrStop = do
       s <- string' "START" <|> string' "STOP"
       skipSome spaceChar
       case T.toUpper . T.pack $ s of
         "START" -> return Start
-        "STOP" -> return Stop
-        _ -> unexpected (Tokens $ fromList s)
+        "STOP"  -> return Stop
+        _       -> unexpected (Tokens $ fromList s)
 
 parseProjectNameAndTags :: Parsec () T.Text (T.Text, [T.Text])
 parseProjectNameAndTags = do
@@ -185,8 +185,8 @@ parseTags = do
       tag <- some (alphaNumChar <|> symbolChar <|> punctuationChar)
       skipMany separatorChar
       return $ T.pack tag
-        
+
 parseWorkFlowEntry :: T.Text -> Either T.Text WorkFlowEntry
 parseWorkFlowEntry input = case parse workFlowEntryParser "" input of
-  Right a -> Right a
+  Right a  -> Right a
   Left err -> Left $ T.pack $ "error: " ++ show err
