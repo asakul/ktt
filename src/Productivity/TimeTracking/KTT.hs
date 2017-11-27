@@ -30,7 +30,8 @@ import           Data.List (sortOn)
 import           Data.List.NonEmpty           hiding (reverse)
 import qualified Data.Map                     as M
 import qualified Data.Text                    as T
-import qualified Data.Text.IO                 as TIO
+import qualified Data.Text.Encoding           as TE
+import qualified Data.ByteString.Char8        as B
 import qualified Data.Text.Lazy               as TL
 import qualified Data.Text.Lazy.Builder       as TLB
 import           System.IO
@@ -91,7 +92,7 @@ appendWorkFlowEntry filename entry =
       hSeek h SeekFromEnd 0
       when (lastChar /= '\n') $ hPutStrLn h ""
     hSeek h SeekFromEnd 0
-    TIO.hPutStrLn h $ renderWorkFlowEntry entry)
+    B.hPutStrLn h $ TE.encodeUtf8 $ renderWorkFlowEntry entry)
 
 combineFrames :: WorkFlow -> ([Frame], [T.Text])
 combineFrames (WorkFlow entries) = runWriter $ combineFrames' entries M.empty []
