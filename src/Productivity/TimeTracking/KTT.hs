@@ -38,7 +38,7 @@ import qualified Text.Megaparsec.Lexer        as L
 data Frame = Frame {
   fProject :: T.Text,
   fTags    :: [T.Text],
-  fStart   :: Maybe DateTime,
+  fStart   :: DateTime,
   fEnd     :: Maybe DateTime
 } deriving (Show, Eq)
 
@@ -89,7 +89,7 @@ combineFrames (WorkFlow entries) = runWriter $ combineFrames' entries M.empty []
     combineFrames' (e:es) frames acc = case e of
       FrameStart project tags timestamp -> do
         when (M.member project frames) $ tell ["Project reopened: " `T.append` project]
-        combineFrames' es (M.insert project (Frame project tags (Just timestamp) Nothing) frames) acc
+        combineFrames' es (M.insert project (Frame project tags timestamp Nothing) frames) acc
       FrameStop project timestamp -> do
         case M.lookup project frames of
           Just frame -> combineFrames' es (M.delete project frames) (frame { fEnd = Just timestamp } : acc)

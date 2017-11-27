@@ -1,8 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE MultiWayIf #-}
 
 module Main where
 
 import           Console.Options
+import           Control.Monad
 import           Data.Hourglass
 import qualified Data.Map                      as M
 import           Data.Maybe
@@ -61,30 +63,62 @@ main = do
             let frames = fst $ combineFrames wf
             let cells = fmap createFrameRow frames
             TIO.putStrLn $ tabl EnvAscii hdecor vdecor aligns cells)
-    command "report" $
+    command "report" $ do
+      week <- flag $ FlagShort 'w' <> FlagLong "week"
+      today <- flag $ FlagShort 't' <> FlagLong "today"
       action (\toParam -> do
+        when (toParam week && toParam today) $
+          error "Either -w or -t should be active"
+        now <- dateCurrent
         frames <- fst . combineFrames <$> loadWorkFlowFromFile journalFile
         let hdecor = DecorNone
         let vdecor = DecorAll
         let aligns = [AlignCentre]
-        let cells = fmap createReportRow $ M.toList $ foldl foldFrames M.empty frames
+        let cells = fmap createReportRow $ M.toList $ foldl foldFrames M.empty $ applyFilters now (toParam week) (toParam today) frames
         TIO.putStrLn $ tabl EnvAscii hdecor vdecor aligns cells)
 
-createFrameRow :: Frame -> [T.Text]
-createFrameRow frame = [ppTime (fStart frame), ppTime (fEnd frame), durationFrame, fProject frame, T.unwords (fTags frame)]
+applyFilters :: DateTime -> Bool -> Bool -> [Frame] -> [Frame]
+applyFilters now onlyWeek onlyToday frames = case extents of
+  Just e -> filter (isInTimeExtents e) frames
+  Nothing -> frames
   where
-    durationFrame = case (fStart frame, fEnd frame) of
-      (Just start, Just end) -> ppTimeDiff $ end `timeDiff` start
+    isInTimeExtents extents@(start, end) frame = case fEnd frame of
+      Just frameEnd -> fStart frame >= start && frameEnd <= end
+      Nothing -> fStart frame >= start && fStart frame <= end
+    extents = if
+      | onlyWeek -> Just (startOfWeek, endOfWeek)
+      | onlyToday -> Just (startOfToday, endOfToday)
+      | otherwise -> Nothing
+
+    startOfToday = now { dtTime = midnight }
+    endOfToday = now { dtDate = dtDate now `dateAddPeriod` oneDayPeriod, dtTime = midnight }
+    oneDayPeriod = Period 0 0 1
+
+    startOfWeek = DateTime { dtDate = dtDate now `dateAddPeriod` negDelta, dtTime = midnight }
+    endOfWeek = DateTime { dtDate = dtDate now `dateAddPeriod` posDelta, dtTime = midnight }
+    midnight = TimeOfDay 0 0 0 0
+    posDelta = if (getWeekDay . dtDate) now /= Sunday
+      then Period 0 0 (7 - fromEnum (getWeekDay . dtDate $ now) + 1)
+      else Period 0 0 1
+    negDelta = if (getWeekDay . dtDate) now /= Sunday
+      then Period 0 0 (-(fromEnum (getWeekDay . dtDate $ now) - 1))
+      else Period 0 0 7
+
+createFrameRow :: Frame -> [T.Text]
+createFrameRow frame = [ppTime (Just $ fStart frame), ppTime (fEnd frame), durationFrame, fProject frame, T.unwords (fTags frame)]
+  where
+    durationFrame = case fEnd frame of
+      (Just end) -> ppTimeDiff $ end `timeDiff` fStart frame
       _                      -> " *** "
 
 createReportRow :: (T.Text, Seconds) -> [T.Text]
 createReportRow (project, time) = [project, ppTimeDiff time]
 
 foldFrames :: M.Map T.Text Seconds -> Frame -> M.Map T.Text Seconds
-foldFrames m f = case (fStart f, fEnd f) of
-  (Just start, Just end) -> M.alter (\mx -> case mx of
-    Just x  -> Just $ x + end `timeDiff` start
-    Nothing -> Just $ end `timeDiff` start) (fProject f) m
+foldFrames m f = case fEnd f of
+  Just end -> M.alter (\mx -> case mx of
+    Just x  -> Just $ x + end `timeDiff` fStart f
+    Nothing -> Just $ end `timeDiff` fStart f) (fProject f) m
   _ -> m
 
 ppTime :: Maybe DateTime -> T.Text
