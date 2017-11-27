@@ -10,6 +10,7 @@ module Productivity.TimeTracking.KTT (
   parseProjectName,
   parseTags,
   loadWorkFlowFromFile,
+  loadWorkFlowFromFiles,
   combineFrames,
   renderWorkFlowEntry,
   appendWorkFlowEntry
@@ -25,10 +26,12 @@ import           Data.Conduit.Binary          as CB
 import           Data.Conduit.List            as CL
 import           Data.Conduit.Text            as CT
 import           Data.Hourglass
+import           Data.List (sortOn)
 import           Data.List.NonEmpty           hiding (reverse)
 import qualified Data.Map                     as M
 import qualified Data.Text                    as T
-import qualified Data.Text.IO                 as TIO
+import qualified Data.Text.Encoding           as TE
+import qualified Data.ByteString.Char8        as B
 import qualified Data.Text.Lazy               as TL
 import qualified Data.Text.Lazy.Builder       as TLB
 import           System.IO
@@ -45,8 +48,16 @@ data Frame = Frame {
 data WorkFlow = WorkFlow [WorkFlowEntry]
   deriving (Show, Eq)
 
+instance Monoid WorkFlow where
+  mempty = WorkFlow []
+  mappend (WorkFlow x) (WorkFlow y) = WorkFlow (sortOn wfeTimestamp $ mappend x y)
+
 data WorkFlowEntry = FrameStart T.Text [T.Text] DateTime | FrameStop T.Text DateTime
   deriving (Show, Eq)
+
+wfeTimestamp :: WorkFlowEntry -> DateTime
+wfeTimestamp (FrameStart _ _ t) = t
+wfeTimestamp (FrameStop _ t) = t
 
 renderWorkFlowEntry :: WorkFlowEntry -> T.Text
 renderWorkFlowEntry entry = TL.toStrict . TLB.toLazyText . mconcat $ case entry of
@@ -81,7 +92,7 @@ appendWorkFlowEntry filename entry =
       hSeek h SeekFromEnd 0
       when (lastChar /= '\n') $ hPutStrLn h ""
     hSeek h SeekFromEnd 0
-    TIO.hPutStrLn h $ renderWorkFlowEntry entry)
+    B.hPutStrLn h $ TE.encodeUtf8 $ renderWorkFlowEntry entry)
 
 combineFrames :: WorkFlow -> ([Frame], [T.Text])
 combineFrames (WorkFlow entries) = runWriter $ combineFrames' entries M.empty []
@@ -97,6 +108,9 @@ combineFrames (WorkFlow entries) = runWriter $ combineFrames' entries M.empty []
             tell ["Unopened project is closed: " `T.append` project]
             combineFrames' es frames acc
     combineFrames' [] frames acc = return $ (fmap snd . M.toList) frames ++ acc
+
+loadWorkFlowFromFiles :: [FilePath] -> IO WorkFlow
+loadWorkFlowFromFiles filenames = mconcat <$> forM filenames loadWorkFlowFromFile
 
 loadWorkFlowFromFile :: FilePath -> IO WorkFlow
 loadWorkFlowFromFile filename = do
